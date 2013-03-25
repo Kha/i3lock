@@ -31,7 +31,6 @@
 #include <signal.h>
 
 #include <wayland-client.h>
-#include "../shared/os-compatibility.h"
 
 struct display {
 	struct wl_display *display;
@@ -70,6 +69,42 @@ static const struct wl_buffer_listener buffer_listener = {
 	buffer_release
 };
 
+static int
+os_create_anonymous_file(off_t size)
+{
+	static const char template[] = "/weston-shared-XXXXXX";
+	const char *path;
+	char *name;
+	int fd;
+
+	path = getenv("XDG_RUNTIME_DIR");
+	if (!path) {
+		return -1;
+	}
+
+	name = malloc(strlen(path) + sizeof(template));
+	if (!name)
+		return -1;
+
+	strcpy(name, path);
+	strcat(name, template);
+
+	fd = mkstemp(name);
+	if (fd >= 0)
+		unlink(name);
+
+	free(name);
+
+	if (fd < 0)
+		return -1;
+
+	if (ftruncate(fd, size) < 0) {
+		close(fd);
+		return -1;
+	}
+
+	return fd;
+}
 static int
 create_shm_buffer(struct display *display, struct buffer *buffer,
 		  int width, int height, uint32_t format)

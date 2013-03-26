@@ -167,7 +167,7 @@ static const struct wl_shell_surface_listener shell_surface_listener = {
 	handle_popup_done
 };
 
-static struct window *
+struct window *
 create_window(struct display *display, int width, int height)
 {
 	struct window *window;
@@ -195,7 +195,7 @@ create_window(struct display *display, int width, int height)
 	return window;
 }
 
-static void
+void
 destroy_window(struct window *window)
 {
 	if (window->callback)
@@ -240,70 +240,11 @@ window_next_buffer(struct window *window)
 	return buffer;
 }
 
-static void
-paint_pixels(void *image, int padding, int width, int height, uint32_t time)
-{
-	const int halfh = padding + (height - padding * 2) / 2;
-	const int halfw = padding + (width  - padding * 2) / 2;
-	int ir, or;
-	uint32_t *pixel = image;
-	int y;
-
-	/* squared radii thresholds */
-	or = (halfw < halfh ? halfw : halfh) - 8;
-	ir = or - 32;
-	or *= or;
-	ir *= ir;
-
-	pixel += padding * width;
-	for (y = padding; y < height - padding; y++) {
-		int x;
-		int y2 = (y - halfh) * (y - halfh);
-
-		pixel += padding;
-		for (x = padding; x < width - padding; x++) {
-			uint32_t v;
-
-			/* squared distance from center */
-			int r2 = (x - halfw) * (x - halfw) + y2;
-
-			if (r2 < ir)
-				v = (r2 / 32 + time / 64) * 0x0080401;
-			else if (r2 < or)
-				v = (y + time / 32) * 0x0080401;
-			else
-				v = (x + time / 16) * 0x0080401;
-			v &= 0x00ffffff;
-
-			/* cross if compositor uses X from XRGB as alpha */
-			if (abs(x - y) > 6 && abs(x + y - height) > 6)
-				v |= 0xff000000;
-
-			*pixel++ = v;
-		}
-
-		pixel += padding;
-	}
-}
-
 static const struct wl_callback_listener frame_listener;
 
-static void
-redraw(void *data, struct wl_callback *callback, uint32_t time)
-{
-	struct window *window = data;
-	struct buffer *buffer;
-
-	buffer = window_next_buffer(window);
-	if (!buffer) {
-		fprintf(stderr,
-			!callback ? "Failed to create the first buffer.\n" :
-			"Both buffers busy at redraw(). Server bug?\n");
-		abort();
-	}
-
-	paint_pixels(buffer->shm_data, 20, window->width, window->height, time);
-
+void
+draw(struct window *window) {
+	struct buffer *buffer = window_next_buffer(window);
 	if (window->prev_buffer != buffer) {
 		wl_surface_attach(window->surface, buffer->buffer, 0, 0);
 		window->prev_buffer = buffer;
@@ -311,19 +252,8 @@ redraw(void *data, struct wl_callback *callback, uint32_t time)
 
 	wl_surface_damage(window->surface,
 			  20, 20, window->width - 40, window->height - 40);
-
-	if (callback)
-		wl_callback_destroy(callback);
-
-	window->callback = wl_surface_frame(window->surface);
-	wl_callback_add_listener(window->callback, &frame_listener, window);
 	wl_surface_commit(window->surface);
-	buffer->busy = 1;
 }
-
-static const struct wl_callback_listener frame_listener = {
-	redraw
-};
 
 static void
 shm_format(void *data, struct wl_shm *wl_shm, uint32_t format)
@@ -368,7 +298,7 @@ static const struct wl_registry_listener registry_listener = {
 	registry_handle_global_remove
 };
 
-static struct display *
+struct display *
 create_display(void)
 {
 	struct display *display;
@@ -399,7 +329,7 @@ create_display(void)
 	return display;
 }
 
-static void
+void
 destroy_display(struct display *display)
 {
 	if (display->shm)
@@ -415,46 +345,4 @@ destroy_display(struct display *display)
 	wl_display_flush(display->display);
 	wl_display_disconnect(display->display);
 	free(display);
-}
-
-static int running = 1;
-
-static void
-signal_int(int signum)
-{
-	running = 0;
-}
-
-int
-main(int argc, char **argv)
-{
-	struct sigaction sigint;
-	struct display *display;
-	struct window *window;
-	int ret = 0;
-
-	display = create_display();
-	window = create_window(display, 250, 250);
-	if (!window)
-		return 1;
-
-	sigint.sa_handler = signal_int;
-	sigemptyset(&sigint.sa_mask);
-	sigint.sa_flags = SA_RESETHAND;
-	sigaction(SIGINT, &sigint, NULL);
-
-	/* Initialise damage to full surface, so the padding gets painted */
-	wl_surface_damage(window->surface, 0, 0,
-			  window->width, window->height);
-
-	redraw(window, NULL, 0);
-
-	while (running && ret != -1)
-		ret = wl_display_dispatch(display->display);
-
-	fprintf(stderr, "simple-shm exiting\n");
-	destroy_window(window);
-	destroy_display(display);
-
-	return 0;
 }

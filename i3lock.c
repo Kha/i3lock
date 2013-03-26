@@ -27,12 +27,14 @@
 #include <xkbcommon/xkbcommon.h>
 #include <cairo.h>
 #include <cairo/cairo-xcb.h>
+#include <wayland-client.h>
 
 #include "i3lock.h"
 #include "xcb.h"
 #include "cursors.h"
 #include "unlock_indicator.h"
 #include "xinerama.h"
+#include "wayland.h"
 
 /* We need this for libxkbfile */
 static Display *display;
@@ -600,6 +602,20 @@ int main(int argc, char *argv[]) {
     if (mlock(password, sizeof(password)) != 0)
         err(EXIT_FAILURE, "Could not lock page in memory, check RLIMIT_MEMLOCK");
 #endif
+
+    struct display *d = create_display();
+    if (!d) return 1;
+    struct window *window = create_window(d, 250, 250);
+    if (!window) return 1;
+
+    draw(window);
+    while (ret != -1)
+        ret = wl_display_dispatch(d->display);
+
+    destroy_window(window);
+    destroy_display(d);
+    return 0;
+
 
     /* Initialize connection to X11 */
     if ((display = XOpenDisplay(NULL)) == NULL)

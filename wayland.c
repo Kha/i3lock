@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <signal.h>
+#include <cairo.h>
 
 #include <wayland-client.h>
 
@@ -43,7 +44,9 @@ struct display {
 
 struct buffer {
 	struct wl_buffer *buffer;
+	cairo_surface_t *cairo_surface;
 	void *shm_data;
+	int shm_size;
 	int busy;
 };
 
@@ -53,8 +56,7 @@ struct window {
 	struct wl_surface *surface;
 	struct wl_shell_surface *shell_surface;
 	struct buffer buffers[2];
-	struct buffer *prev_buffer;
-	struct wl_callback *callback;
+	struct buffer *current;
 };
 
 static void
@@ -105,15 +107,16 @@ os_create_anonymous_file(off_t size)
 
 	return fd;
 }
+
 static int
-create_shm_buffer(struct display *display, struct buffer *buffer,
-		  int width, int height, uint32_t format)
+buffer_init(struct buffer *buffer, struct display *display,
+		  int width, int height)
 {
 	struct wl_shm_pool *pool;
 	int fd, size, stride;
 	void *data;
 
-	stride = width * 4;
+	stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, width);
 	size = stride * height;
 
 	fd = os_create_anonymous_file(size);
@@ -130,17 +133,70 @@ create_shm_buffer(struct display *display, struct buffer *buffer,
 		return -1;
 	}
 
+	buffer->cairo_surface = cairo_image_surface_create_for_data(data,
+						       CAIRO_FORMAT_ARGB32,
+						       width,
+						       height,
+						       stride);
+
 	pool = wl_shm_create_pool(display->shm, fd, size);
 	buffer->buffer = wl_shm_pool_create_buffer(pool, 0,
 						   width, height,
-						   stride, format);
+						   stride, WL_SHM_FORMAT_ARGB8888);
 	wl_buffer_add_listener(buffer->buffer, &buffer_listener, buffer);
 	wl_shm_pool_destroy(pool);
 	close(fd);
 
 	buffer->shm_data = data;
+	buffer->shm_size = size;
 
 	return 0;
+}
+
+static void
+buffer_reset(struct buffer *buffer)
+{
+	cairo_surface_destroy(buffer->cairo_surface);
+	wl_buffer_destroy(buffer->buffer);
+	munmap(buffer->shm_data, buffer->shm_size);
+}
+
+cairo_t *
+window_acquire_cairo_context(struct window *window)
+{
+	struct buffer *buffer;
+
+	/* pick a free buffer from the two */
+	if (!window->buffers[0].busy)
+		buffer = &window->buffers[0];
+	else
+		buffer = &window->buffers[1];
+
+	if (buffer->cairo_surface &&
+	    cairo_image_surface_get_width(buffer->cairo_surface) == window->width &&
+	    cairo_image_surface_get_height(buffer->cairo_surface) == window->height)
+		goto out;
+
+	if (buffer->cairo_surface)
+		buffer_reset(buffer);
+
+	buffer_init(buffer, window->display, window->width, window->height);
+
+out:
+	if (window->current != buffer)
+		wl_surface_attach(window->surface, buffer->buffer, 0, 0);
+
+	window->current = buffer;
+	return cairo_create(buffer->cairo_surface);
+}
+
+void
+window_release_cairo_context(struct window *window, cairo_t *cairo)
+{
+	cairo_destroy(cairo);
+	window->current->busy = 1;
+	wl_surface_damage(window->surface, 0, 0, window->width, window->height);
+	wl_surface_commit(window->surface);
 }
 
 static void
@@ -176,7 +232,6 @@ create_window(struct display *display, int width, int height)
 	if (!window)
 		return NULL;
 
-	window->callback = NULL;
 	window->display = display;
 	window->width = width;
 	window->height = height;
@@ -198,9 +253,6 @@ create_window(struct display *display, int width, int height)
 void
 destroy_window(struct window *window)
 {
-	if (window->callback)
-		wl_callback_destroy(window->callback);
-
 	if (window->buffers[0].buffer)
 		wl_buffer_destroy(window->buffers[0].buffer);
 	if (window->buffers[1].buffer)
@@ -209,50 +261,6 @@ destroy_window(struct window *window)
 	wl_shell_surface_destroy(window->shell_surface);
 	wl_surface_destroy(window->surface);
 	free(window);
-}
-
-static struct buffer *
-window_next_buffer(struct window *window)
-{
-	struct buffer *buffer;
-	int ret = 0;
-
-	if (!window->buffers[0].busy)
-		buffer = &window->buffers[0];
-	else if (!window->buffers[1].busy)
-		buffer = &window->buffers[1];
-	else
-		return NULL;
-
-	if (!buffer->buffer) {
-		ret = create_shm_buffer(window->display, buffer,
-					window->width, window->height,
-					WL_SHM_FORMAT_XRGB8888);
-
-		if (ret < 0)
-			return NULL;
-
-		/* paint the padding */
-		memset(buffer->shm_data, 0xff,
-		       window->width * window->height * 4);
-	}
-
-	return buffer;
-}
-
-static const struct wl_callback_listener frame_listener;
-
-void
-draw(struct window *window) {
-	struct buffer *buffer = window_next_buffer(window);
-	if (window->prev_buffer != buffer) {
-		wl_surface_attach(window->surface, buffer->buffer, 0, 0);
-		window->prev_buffer = buffer;
-	}
-
-	wl_surface_damage(window->surface,
-			  20, 20, window->width - 40, window->height - 40);
-	wl_surface_commit(window->surface);
 }
 
 static void
@@ -319,13 +327,13 @@ create_display(void)
 
 	wl_display_roundtrip(display->display);
 
-	if (!(display->formats & (1 << WL_SHM_FORMAT_XRGB8888))) {
-		fprintf(stderr, "WL_SHM_FORMAT_XRGB32 not available\n");
+	if (!(display->formats & (1 << WL_SHM_FORMAT_ARGB8888))) {
+		fprintf(stderr, "WL_SHM_FORMAT_ARGB32 not available\n");
 		exit(1);
 	}
 
 	wl_display_get_fd(display->display);
-	
+
 	return display;
 }
 

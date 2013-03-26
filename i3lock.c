@@ -604,11 +604,16 @@ int main(int argc, char *argv[]) {
 #endif
 
     struct display *d = create_display();
-    if (!d) return 1;
     struct window *window = create_window(d, 250, 250);
-    if (!window) return 1;
 
-    draw(window);
+    wl_shell_surface_set_fullscreen(window->shell_surface, 0, 0, NULL);
+
+    cairo_t *ctx = window_acquire_cairo_context(window);
+    img = cairo_image_surface_create_from_png(image_path);
+    cairo_set_source_surface(ctx, img, 0, 0);
+    cairo_paint(ctx);
+    window_release_cairo_context(window, ctx);
+
     while (ret != -1)
         ret = wl_display_dispatch(d->display);
 

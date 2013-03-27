@@ -21,14 +21,15 @@ struct window {
     int width, height;
     struct wl_surface *surface;
     struct wl_shell_surface *shell_surface;
+    void (*redraw)(struct window *window, cairo_t *cairo_context);
 };
 
 struct display *create_display(void);
 void destroy_display(struct display *display);
+void display_run(struct display *display);
 
 struct window *create_window(struct display *display, int width, int height);
 void destroy_window(struct window *window);
-cairo_t *window_acquire_cairo_context(struct window *window);
-void window_release_cairo_context(struct window *window, cairo_t *cairo);
+void window_schedule_redraw(struct window *window);
 
 #endif

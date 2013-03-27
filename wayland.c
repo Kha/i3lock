@@ -57,8 +57,12 @@ struct window {
     int width, height;
     struct wl_surface *surface;
     struct wl_shell_surface *shell_surface;
+    void (*redraw)(struct window *window, cairo_t *cairo_context);
+
     struct buffer buffers[2];
     struct buffer *current;
+    bool redrawing;
+    bool redraw_scheduled;
 };
 
 static void buffer_release(void *data, struct wl_buffer *buffer) {
@@ -146,7 +150,30 @@ static void buffer_reset(struct buffer *buffer) {
     munmap(buffer->shm_data, buffer->shm_size);
 }
 
-cairo_t *window_acquire_cairo_context(struct window *window) {
+static void window_redraw(struct window *window);
+
+static void
+frame_callback(void *data, struct wl_callback *callback, uint32_t time)
+{
+    struct window *window = data;
+
+    wl_callback_destroy(callback);
+    window->redrawing = false;
+    if (window->redraw_scheduled) {
+        window->redraw_scheduled = false;
+        window_redraw(window);
+    }
+}
+
+static const struct wl_callback_listener listener = {
+    frame_callback
+};
+
+static void window_redraw(struct window *window) {
+    if (!window->redraw)
+        return;
+
+    window->redrawing = true;
     struct buffer *buffer;
 
     /* pick a free buffer from the two */
@@ -155,36 +182,47 @@ cairo_t *window_acquire_cairo_context(struct window *window) {
     else
         buffer = &window->buffers[1];
 
-    if (buffer->cairo_surface &&
-        cairo_image_surface_get_width(buffer->cairo_surface) == window->width &&
-        cairo_image_surface_get_height(buffer->cairo_surface) == window->height)
-        goto out;
+    if (!buffer->cairo_surface ||
+        cairo_image_surface_get_width(buffer->cairo_surface) != window->width ||
+        cairo_image_surface_get_height(buffer->cairo_surface) != window->height) {
 
-    if (buffer->cairo_surface)
-        buffer_reset(buffer);
+        if (buffer->cairo_surface)
+            buffer_reset(buffer);
 
-    buffer_init(buffer, window->display, window->width, window->height);
+        buffer_init(buffer, window->display, window->width, window->height);
+    }
 
-out:
     if (window->current != buffer)
         wl_surface_attach(window->surface, buffer->buffer, 0, 0);
-
     window->current = buffer;
-    return cairo_create(buffer->cairo_surface);
-}
 
-void window_release_cairo_context(struct window *window, cairo_t *cairo) {
+    cairo_t *cairo = cairo_create(buffer->cairo_surface);
+    window->redraw(window, cairo);
     cairo_destroy(cairo);
+
     window->current->busy = 1;
+    wl_callback_add_listener(wl_surface_frame(window->surface), &listener, window);
     wl_surface_damage(window->surface, 0, 0, window->width, window->height);
     wl_surface_commit(window->surface);
 }
+
+void window_schedule_redraw(struct window *window) {
+    if (!window->redrawing)
+        window_redraw(window);
+    else
+        window->redraw_scheduled = true;
+}
+
 
 static void handle_ping(void *data, struct wl_shell_surface *shell_surface, uint32_t serial) {
     wl_shell_surface_pong(shell_surface, serial);
 }
 
 static void handle_configure(void *data, struct wl_shell_surface *shell_surface, uint32_t edges, int32_t width, int32_t height) {
+    struct window *window = data;
+    window->width = width;
+    window->height = height;
+    window_schedule_redraw(window);
 }
 
 static void handle_popup_done(void *data, struct wl_shell_surface *shell_surface) {
@@ -304,4 +342,11 @@ void destroy_display(struct display *display) {
     wl_display_flush(display->display);
     wl_display_disconnect(display->display);
     free(display);
+}
+
+void display_run(struct display *display) {
+    int ret = 0;
+
+    while (ret != -1)
+        ret = wl_display_dispatch(display->display);
 }

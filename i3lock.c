@@ -503,6 +503,11 @@ static void xcb_check_cb(EV_P_ ev_check *w, int revents) {
     }
 }
 
+void wayland_redraw(struct window *window, cairo_t *ctx) {
+    cairo_set_source_surface(ctx, img, 0, 0);
+    cairo_paint(ctx);
+}
+
 int main(int argc, char *argv[]) {
     char *username;
     char *image_path = NULL;
@@ -603,19 +608,16 @@ int main(int argc, char *argv[]) {
         err(EXIT_FAILURE, "Could not lock page in memory, check RLIMIT_MEMLOCK");
 #endif
 
+    img = cairo_image_surface_create_from_png(image_path);
+
     struct display *d = create_display();
     struct window *window = create_window(d, 250, 250);
+    window->redraw = wayland_redraw;
+    window_schedule_redraw(window);
 
     wl_shell_surface_set_fullscreen(window->shell_surface, 0, 0, NULL);
 
-    cairo_t *ctx = window_acquire_cairo_context(window);
-    img = cairo_image_surface_create_from_png(image_path);
-    cairo_set_source_surface(ctx, img, 0, 0);
-    cairo_paint(ctx);
-    window_release_cairo_context(window, ctx);
-
-    while (ret != -1)
-        ret = wl_display_dispatch(d->display);
+    display_run(d);
 
     destroy_window(window);
     destroy_display(d);

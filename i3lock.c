@@ -213,11 +213,13 @@ static void input_done(void) {
      * too early. */
     stop_clear_indicator_timeout();
 
+#ifndef BACKEND_WAYLAND
     /* beep on authentication failure, if enabled */
     if (beep) {
         xcb_bell(conn, 100);
         xcb_flush(conn);
     }
+#endif
 }
 
 /*
@@ -236,21 +238,15 @@ static void redraw_timeout(EV_P_ ev_timer *w, int revents) {
     free(w);
 }
 
-/*
- * Handle key presses. Fixes state, then looks up the key symbol for the
- * given keycode, then looks up the key symbol (as UCS-2), converts it to
- * UTF-8 and stores it in the password array.
- *
- */
-static void handle_key_press(xcb_key_press_event_t *event) {
+static void handle_key_press_core(struct xkb_state *xkb_state, xkb_keycode_t key) {
     xkb_keysym_t ksym;
     char buffer[128];
     int n;
     bool ctrl;
 
-    ksym = xkb_state_key_get_one_sym(xkb_state, event->detail);
+    ksym = xkb_state_key_get_one_sym(xkb_state, key);
     ctrl = xkb_state_mod_name_is_active(xkb_state, "Control", XKB_STATE_MODS_DEPRESSED);
-    xkb_state_update_key(xkb_state, event->detail, XKB_KEY_DOWN);
+    xkb_state_update_key(xkb_state, key, XKB_KEY_DOWN);
 
     /* The buffer will be null-terminated, so n >= 2 for 1 actual character. */
     memset(buffer, '\0', sizeof(buffer));
@@ -330,6 +326,16 @@ static void handle_key_press(xcb_key_press_event_t *event) {
     }
 
     stop_clear_indicator_timeout();
+}
+
+/*
+ * Handle key presses. Fixes state, then looks up the key symbol for the
+ * given keycode, then looks up the key symbol (as UCS-2), converts it to
+ * UTF-8 and stores it in the password array.
+ *
+ */
+static void handle_key_press(xcb_key_press_event_t *event) {
+    handle_key_press_core(xkb_state, event->detail);
 }
 
 /*
@@ -513,12 +519,16 @@ static void wayland_got_event(EV_P_ struct ev_io *w, int revents) {
     wl_display_dispatch(wayland_display->display);
 }
 
-void wayland_redraw(struct window *window, cairo_t *ctx) {
+static void wayland_redraw(struct window *window, cairo_t *ctx) {
     last_resolution[0] = window->width;
     last_resolution[1] = window->height;
 
     draw_image_core(ctx, last_resolution);
 }
+static void wayland_key_press(struct input *input, uint32_t time, uint32_t key, uint32_t unicode, enum wl_keyboard_key_state state) {
+    handle_key_press_core(input->xkb.state, key);
+}
+
 #endif
 
 int main(int argc, char *argv[]) {
@@ -640,8 +650,9 @@ int main(int argc, char *argv[]) {
 #ifdef BACKEND_WAYLAND
 
     wayland_display = create_display();
+    wayland_display->key_handler = wayland_key_press;
     window = create_window(wayland_display, 250, 250);
-    window->redraw = wayland_redraw;
+    window->redraw_handler = wayland_redraw;
     window_schedule_redraw(window);
 
     wl_shell_surface_set_fullscreen(window->shell_surface, 0, 0, NULL);

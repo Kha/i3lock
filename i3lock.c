@@ -37,8 +37,8 @@
 #include "wayland.h"
 
 #ifdef BACKEND_WAYLAND
-static struct display *wayland_display;
-static struct window *window;
+struct display *wayland_display;
+struct window *window;
 #endif
 
 /* We need this for libxkbfile */
@@ -514,8 +514,10 @@ static void wayland_got_event(EV_P_ struct ev_io *w, int revents) {
 }
 
 void wayland_redraw(struct window *window, cairo_t *ctx) {
-    cairo_set_source_surface(ctx, img, 0, 0);
-    cairo_paint(ctx);
+    last_resolution[0] = window->width;
+    last_resolution[1] = window->height;
+
+    draw_image_core(ctx, last_resolution);
 }
 #endif
 

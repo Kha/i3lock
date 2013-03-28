@@ -17,6 +17,7 @@
 #include "xcb.h"
 #include "unlock_indicator.h"
 #include "xinerama.h"
+#include "wayland.h"
 
 #define BUTTON_RADIUS 90
 #define BUTTON_SPACE (BUTTON_RADIUS + 5)
@@ -26,6 +27,11 @@
 /*******************************************************************************
  * Variables defined in i3lock.c.
  ******************************************************************************/
+
+#ifdef BACKEND_WAYLAND
+extern struct display *wayland_display;
+extern struct window *window;
+#endif
 
 /* The current position in the input buffer. Useful to determine if any
  * characters of the password have already been entered or not. */
@@ -65,38 +71,26 @@ static xcb_visualtype_t *vistype;
 unlock_state_t unlock_state;
 pam_state_t pam_state;
 
-/*
- * Draws global image with fill color onto a pixmap with the given
- * resolution and returns it.
- *
- */
-xcb_pixmap_t draw_image(uint32_t *resolution) {
-    xcb_pixmap_t bg_pixmap = XCB_NONE;
-
-    if (!vistype)
-        vistype = get_root_visual_type(screen);
-    bg_pixmap = create_bg_pixmap(conn, screen, resolution, color);
+void draw_image_core(cairo_t *screen_ctx, uint32_t *resolution) {
     /* Initialize cairo: Create one in-memory surface to render the unlock
      * indicator on, create one XCB surface to actually draw (one or more,
      * depending on the amount of screens) unlock indicators on. */
     cairo_surface_t *output = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, BUTTON_DIAMETER, BUTTON_DIAMETER);
     cairo_t *ctx = cairo_create(output);
 
-    cairo_surface_t *xcb_output = cairo_xcb_surface_create(conn, bg_pixmap, vistype, resolution[0], resolution[1]);
-    cairo_t *xcb_ctx = cairo_create(xcb_output);
 
     if (img) {
         if (!tile) {
-            cairo_set_source_surface(xcb_ctx, img, 0, 0);
-            cairo_paint(xcb_ctx);
+            cairo_set_source_surface(screen_ctx, img, 0, 0);
+            cairo_paint(screen_ctx);
         } else {
             /* create a pattern and fill a rectangle as big as the screen */
             cairo_pattern_t *pattern;
             pattern = cairo_pattern_create_for_surface(img);
-            cairo_set_source(xcb_ctx, pattern);
+            cairo_set_source(screen_ctx, pattern);
             cairo_pattern_set_extend(pattern, CAIRO_EXTEND_REPEAT);
-            cairo_rectangle(xcb_ctx, 0, 0, resolution[0], resolution[1]);
-            cairo_fill(xcb_ctx);
+            cairo_rectangle(screen_ctx, 0, 0, resolution[0], resolution[1]);
+            cairo_fill(screen_ctx);
             cairo_pattern_destroy(pattern);
         }
     } else {
@@ -106,9 +100,9 @@ xcb_pixmap_t draw_image(uint32_t *resolution) {
         uint32_t rgb16[3] = {(strtol(strgroups[0], NULL, 16)),
                              (strtol(strgroups[1], NULL, 16)),
                              (strtol(strgroups[2], NULL, 16))};
-        cairo_set_source_rgb(xcb_ctx, rgb16[0] / 255.0, rgb16[1] / 255.0, rgb16[2] / 255.0);
-        cairo_rectangle(xcb_ctx, 0, 0, resolution[0], resolution[1]);
-        cairo_fill(xcb_ctx);
+        cairo_set_source_rgb(screen_ctx, rgb16[0] / 255.0, rgb16[1] / 255.0, rgb16[2] / 255.0);
+        cairo_rectangle(screen_ctx, 0, 0, resolution[0], resolution[1]);
+        cairo_fill(screen_ctx);
     }
 
     if (unlock_state >= STATE_KEY_PRESSED && unlock_indicator) {
@@ -238,9 +232,9 @@ xcb_pixmap_t draw_image(uint32_t *resolution) {
         for (int screen = 0; screen < xr_screens; screen++) {
             int x = (xr_resolutions[screen].x + ((xr_resolutions[screen].width / 2) - (BUTTON_DIAMETER / 2)));
             int y = (xr_resolutions[screen].y + ((xr_resolutions[screen].height / 2) - (BUTTON_DIAMETER / 2)));
-            cairo_set_source_surface(xcb_ctx, output, x, y);
-            cairo_rectangle(xcb_ctx, x, y, BUTTON_DIAMETER, BUTTON_DIAMETER);
-            cairo_fill(xcb_ctx);
+            cairo_set_source_surface(screen_ctx, output, x, y);
+            cairo_rectangle(screen_ctx, x, y, BUTTON_DIAMETER, BUTTON_DIAMETER);
+            cairo_fill(screen_ctx);
         }
     } else {
         /* We have no information about the screen sizes/positions, so we just
@@ -248,14 +242,32 @@ xcb_pixmap_t draw_image(uint32_t *resolution) {
          * hope for the best. */
         int x = (last_resolution[0] / 2);
         int y = (last_resolution[1] / 2);
-        cairo_set_source_surface(xcb_ctx, output, x, y);
-        cairo_rectangle(xcb_ctx, x, y, BUTTON_DIAMETER, BUTTON_DIAMETER);
-        cairo_fill(xcb_ctx);
+        cairo_set_source_surface(screen_ctx, output, x, y);
+        cairo_rectangle(screen_ctx, x, y, BUTTON_DIAMETER, BUTTON_DIAMETER);
+        cairo_fill(screen_ctx);
     }
 
-    cairo_surface_destroy(xcb_output);
     cairo_surface_destroy(output);
     cairo_destroy(ctx);
+}
+
+/*
+ * Draws global image with fill color onto a pixmap with the given
+ * resolution and returns it.
+ *
+ */
+xcb_pixmap_t draw_image(uint32_t *resolution) {
+    xcb_pixmap_t bg_pixmap = XCB_NONE;
+
+    if (!vistype)
+        vistype = get_root_visual_type(screen);
+    bg_pixmap = create_bg_pixmap(conn, screen, resolution, color);
+    cairo_surface_t *xcb_output = cairo_xcb_surface_create(conn, bg_pixmap, vistype, resolution[0], resolution[1]);
+    cairo_t *xcb_ctx = cairo_create(xcb_output);
+
+    draw_image_core(xcb_ctx, resolution);
+
+    cairo_surface_destroy(xcb_output);
     cairo_destroy(xcb_ctx);
     return bg_pixmap;
 }
@@ -265,6 +277,9 @@ xcb_pixmap_t draw_image(uint32_t *resolution) {
  *
  */
 void redraw_screen(void) {
+#ifdef BACKEND_WAYLAND
+    window_schedule_redraw(window);
+#else
     xcb_pixmap_t bg_pixmap = draw_image(last_resolution);
     xcb_change_window_attributes(conn, win, XCB_CW_BACK_PIXMAP, (uint32_t[1]){ bg_pixmap });
     /* XXX: Possible optimization: Only update the area in the middle of the
@@ -272,6 +287,7 @@ void redraw_screen(void) {
     xcb_clear_area(conn, 0, win, 0, 0, last_resolution[0], last_resolution[1]);
     xcb_free_pixmap(conn, bg_pixmap);
     xcb_flush(conn);
+#endif
 }
 
 /*

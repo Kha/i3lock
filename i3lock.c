@@ -519,6 +519,10 @@ static void wayland_got_event(EV_P_ struct ev_io *w, int revents) {
     wl_display_dispatch(wayland_display->display);
 }
 
+static void wayland_prepare_cb(EV_P_ ev_prepare *w, int revents) {
+    wl_display_flush(wayland_display->display);
+}
+
 static void wayland_redraw(struct window *window, cairo_t *ctx) {
     last_resolution[0] = window->width;
     last_resolution[1] = window->height;
@@ -658,14 +662,17 @@ int main(int argc, char *argv[]) {
     wl_shell_surface_set_fullscreen(window->shell_surface, 0, 0, NULL);
 
     struct ev_io *watcher = calloc(sizeof(struct ev_io), 1);
+    struct ev_prepare *wayland_prepare = calloc(sizeof(struct ev_prepare), 1);
     ev_io_init(watcher, wayland_got_event, wayland_display->display_fd, EV_READ);
     ev_io_start(main_loop, watcher);
 
-    /* Invoke the event callback once to catch all the events which were
-     * received up until now. ev will only pick up new events (when the display
+    ev_prepare_init(wayland_prepare, wayland_prepare_cb);
+    ev_prepare_start(main_loop, wayland_prepare);
+
+    /* Catch all the events which were received up until now.
+     * ev will only pick up new events (when the display
      * file descriptor becomes readable). */
     wl_display_dispatch(wayland_display->display);
-    ev_invoke(main_loop, watcher, 0);
 
 #else
 

@@ -654,6 +654,9 @@ int main(int argc, char *argv[]) {
 #ifdef BACKEND_WAYLAND
 
     wayland_display = create_display();
+    if (wayland_display == NULL)
+        errx(EXIT_FAILURE, "Could not connect to Wayland, maybe you need to set WAYLAND_DISPLAY?");
+
     wayland_display->key_handler = wayland_key_press;
     window = create_window(wayland_display, 250, 250);
     window->redraw_handler = wayland_redraw;

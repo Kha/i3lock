@@ -189,6 +189,12 @@ static void input_done(void) {
     pam_state = STATE_PAM_VERIFY;
     redraw_screen();
 
+#ifdef BACKEND_WAYLAND
+    /* block until the screen is actually redrawn */
+    window_await_frame(window);
+    window_await_frame(window);
+#endif
+
     if (pam_authenticate(pam_handle, 0) == PAM_SUCCESS) {
         DEBUG("successfully authenticated\n");
         clear_password_memory();

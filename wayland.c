@@ -231,6 +231,22 @@ void window_schedule_redraw(struct window *window) {
         window->redraw_scheduled = true;
 }
 
+static void await_frame_callback(void *data, struct wl_callback *callback, uint32_t time) {
+    bool *still_waiting = data;
+    *still_waiting = false;
+    wl_callback_destroy(callback);
+}
+
+void window_await_frame(struct window *window) {
+    struct wl_callback_listener await_listener = { await_frame_callback };
+    bool still_waiting = true;
+
+    wl_callback_add_listener(wl_surface_frame(window->surface), &await_listener, &still_waiting);
+    wl_surface_commit(window->surface);
+
+    while (still_waiting)
+        wl_display_dispatch(window->display->display);
+}
 
 static void handle_ping(void *data, struct wl_shell_surface *shell_surface, uint32_t serial) {
     wl_shell_surface_pong(shell_surface, serial);

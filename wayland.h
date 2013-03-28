@@ -48,5 +48,6 @@ void display_run(struct display *display);
 struct window *create_window(struct display *display, int width, int height);
 void destroy_window(struct window *window);
 void window_schedule_redraw(struct window *window);
+void window_await_frame(struct window *window);
 
 #endif

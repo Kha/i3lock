@@ -41,6 +41,7 @@ struct display {
     struct wl_compositor *compositor;
     struct wl_shell *shell;
     struct wl_shm *shm;
+    int display_fd;
     uint32_t formats;
 };
 
@@ -250,7 +251,7 @@ struct window *create_window(struct display *display, int width, int height) {
     if (window->shell_surface)
         wl_shell_surface_add_listener(window->shell_surface, &shell_surface_listener, window);
 
-    wl_shell_surface_set_title(window->shell_surface, "simple-shm");
+    wl_shell_surface_set_title(window->shell_surface, "i3lock");
 
     wl_shell_surface_set_toplevel(window->shell_surface);
 
@@ -323,7 +324,7 @@ struct display *create_display(void) {
         exit(1);
     }
 
-    wl_display_get_fd(display->display);
+    display->display_fd = wl_display_get_fd(display->display);
 
     return display;
 }

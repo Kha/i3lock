@@ -36,6 +36,11 @@
 #include "xinerama.h"
 #include "wayland.h"
 
+#ifdef BACKEND_WAYLAND
+static struct display *wayland_display;
+static struct window *window;
+#endif
+
 /* We need this for libxkbfile */
 static Display *display;
 char color[7] = "ffffff";
@@ -503,10 +508,16 @@ static void xcb_check_cb(EV_P_ ev_check *w, int revents) {
     }
 }
 
+#ifdef BACKEND_WAYLAND
+static void wayland_got_event(EV_P_ struct ev_io *w, int revents) {
+    wl_display_dispatch(wayland_display->display);
+}
+
 void wayland_redraw(struct window *window, cairo_t *ctx) {
     cairo_set_source_surface(ctx, img, 0, 0);
     cairo_paint(ctx);
 }
+#endif
 
 int main(int argc, char *argv[]) {
     char *username;
@@ -619,19 +630,29 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    /* Initialize the libev event loop. */
+    main_loop = EV_DEFAULT;
+    if (main_loop == NULL)
+        errx(EXIT_FAILURE, "Could not initialize libev. Bad LIBEV_FLAGS?\n");
+
 #ifdef BACKEND_WAYLAND
 
-    struct display *d = create_display();
-    struct window *window = create_window(d, 250, 250);
+    wayland_display = create_display();
+    window = create_window(wayland_display, 250, 250);
     window->redraw = wayland_redraw;
     window_schedule_redraw(window);
 
     wl_shell_surface_set_fullscreen(window->shell_surface, 0, 0, NULL);
 
-    display_run(d);
+    struct ev_io *watcher = calloc(sizeof(struct ev_io), 1);
+    ev_io_init(watcher, wayland_got_event, wayland_display->display_fd, EV_READ);
+    ev_io_start(main_loop, watcher);
 
-    destroy_window(window);
-    destroy_display(d);
+    /* Invoke the event callback once to catch all the events which were
+     * received up until now. ev will only pick up new events (when the display
+     * file descriptor becomes readable). */
+    wl_display_dispatch(wayland_display->display);
+    ev_invoke(main_loop, watcher, 0);
 
 #else
 
@@ -688,11 +709,6 @@ int main(int argc, char *argv[]) {
     if (dpms)
         dpms_turn_off_screen(conn);
 
-    /* Initialize the libev event loop. */
-    main_loop = EV_DEFAULT;
-    if (main_loop == NULL)
-        errx(EXIT_FAILURE, "Could not initialize libev. Bad LIBEV_FLAGS?\n");
-
     struct ev_io *xcb_watcher = calloc(sizeof(struct ev_io), 1);
     struct ev_check *xcb_check = calloc(sizeof(struct ev_check), 1);
     struct ev_prepare *xcb_prepare = calloc(sizeof(struct ev_prepare), 1);
@@ -710,7 +726,8 @@ int main(int argc, char *argv[]) {
      * received up until now. ev will only pick up new events (when the X11
      * file descriptor becomes readable). */
     ev_invoke(main_loop, xcb_check, 0);
-    ev_loop(main_loop, 0);
 
 #endif
+
+    ev_loop(main_loop, 0);
 }

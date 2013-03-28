@@ -608,7 +608,18 @@ int main(int argc, char *argv[]) {
         err(EXIT_FAILURE, "Could not lock page in memory, check RLIMIT_MEMLOCK");
 #endif
 
-    img = cairo_image_surface_create_from_png(image_path);
+    if (image_path) {
+        /* Create a pixmap to render on, fill it with the background color */
+        img = cairo_image_surface_create_from_png(image_path);
+        /* In case loading failed, we just pretend no -i was specified. */
+        if (cairo_surface_status(img) != CAIRO_STATUS_SUCCESS) {
+            fprintf(stderr, "Could not load image \"%s\": cairo surface status %d\n",
+                    image_path, cairo_surface_status(img));
+            img = NULL;
+        }
+    }
+
+#ifdef BACKEND_WAYLAND
 
     struct display *d = create_display();
     struct window *window = create_window(d, 250, 250);
@@ -621,8 +632,8 @@ int main(int argc, char *argv[]) {
 
     destroy_window(window);
     destroy_display(d);
-    return 0;
 
+#else
 
     /* Initialize connection to X11 */
     if ((display = XOpenDisplay(NULL)) == NULL)
@@ -663,17 +674,6 @@ int main(int argc, char *argv[]) {
     xcb_change_window_attributes(conn, screen->root, XCB_CW_EVENT_MASK,
             (uint32_t[]){ XCB_EVENT_MASK_STRUCTURE_NOTIFY });
 
-    if (image_path) {
-        /* Create a pixmap to render on, fill it with the background color */
-        img = cairo_image_surface_create_from_png(image_path);
-        /* In case loading failed, we just pretend no -i was specified. */
-        if (cairo_surface_status(img) != CAIRO_STATUS_SUCCESS) {
-            fprintf(stderr, "Could not load image \"%s\": cairo surface status %d\n",
-                    image_path, cairo_surface_status(img));
-            img = NULL;
-        }
-    }
-
     /* Pixmap on which the image is rendered to (if any) */
     xcb_pixmap_t bg_pixmap = draw_image(last_resolution);
 
@@ -711,4 +711,6 @@ int main(int argc, char *argv[]) {
      * file descriptor becomes readable). */
     ev_invoke(main_loop, xcb_check, 0);
     ev_loop(main_loop, 0);
+
+#endif
 }

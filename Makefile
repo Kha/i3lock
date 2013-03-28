@@ -11,12 +11,20 @@ CFLAGS += -std=c99
 CFLAGS += -pipe
 CFLAGS += -Wall
 CPPFLAGS += -D_GNU_SOURCE
-CFLAGS += $(shell pkg-config --cflags cairo xcb-dpms xcb-xinerama xkbcommon xkbfile x11 x11-xcb wayland-client)
-LIBS += $(shell pkg-config --libs cairo xcb-dpms xcb-xinerama xcb-image xkbcommon xkbfile x11 x11-xcb wayland-client)
+CFLAGS += $(shell pkg-config --cflags cairo xcb-dpms xcb-xinerama xkbcommon xkbfile x11 x11-xcb)
+LIBS += $(shell pkg-config --libs cairo xcb-dpms xcb-xinerama xcb-image xkbcommon xkbfile x11 x11-xcb)
 LIBS += -lpam
 LIBS += -lev
 
-FILES:=$(wildcard *.c)
+FILES:= i3lock.c xcb.c xinerama.c unlock_indicator.c
+
+ifdef BACKEND_WAYLAND
+	CPPFLAGS += -DBACKEND_WAYLAND
+	CFLAGS += $(shell pkg-config --cflags wayland-client)
+	LIBS += $(shell pkg-config --libs wayland-client)
+	FILES += wayland.c
+endif
+
 FILES:=$(FILES:.c=.o)
 
 VERSION:=$(shell git describe --tags --abbrev=0)

@@ -240,8 +240,8 @@ void draw_image_core(cairo_t *screen_ctx, uint32_t *resolution) {
         /* We have no information about the screen sizes/positions, so we just
          * place the unlock indicator in the middle of the X root window and
          * hope for the best. */
-        int x = (last_resolution[0] / 2);
-        int y = (last_resolution[1] / 2);
+        int x = (last_resolution[0] / 2) - (BUTTON_DIAMETER / 2);
+        int y = (last_resolution[1] / 2) - (BUTTON_DIAMETER / 2);
         cairo_set_source_surface(screen_ctx, output, x, y);
         cairo_rectangle(screen_ctx, x, y, BUTTON_DIAMETER, BUTTON_DIAMETER);
         cairo_fill(screen_ctx);

@@ -238,13 +238,11 @@ static void redraw_timeout(EV_P_ ev_timer *w, int revents) {
     free(w);
 }
 
-static void handle_key_press_core(struct xkb_state *xkb_state, xkb_keycode_t key) {
-    xkb_keysym_t ksym;
+static void handle_key_press_core(struct xkb_state *xkb_state, xkb_keycode_t key, xkb_keysym_t ksym) {
     char buffer[128];
     int n;
     bool ctrl;
 
-    ksym = xkb_state_key_get_one_sym(xkb_state, key);
     ctrl = xkb_state_mod_name_is_active(xkb_state, "Control", XKB_STATE_MODS_DEPRESSED);
     xkb_state_update_key(xkb_state, key, XKB_KEY_DOWN);
 
@@ -335,7 +333,7 @@ static void handle_key_press_core(struct xkb_state *xkb_state, xkb_keycode_t key
  *
  */
 static void handle_key_press(xcb_key_press_event_t *event) {
-    handle_key_press_core(xkb_state, event->detail);
+    handle_key_press_core(xkb_state, event->detail, xkb_state_key_get_one_sym(xkb_state, event->detail));
 }
 
 /*
@@ -530,7 +528,8 @@ static void wayland_redraw(struct window *window, cairo_t *ctx) {
     draw_image_core(ctx, last_resolution);
 }
 static void wayland_key_press(struct input *input, uint32_t time, uint32_t key, uint32_t unicode, enum wl_keyboard_key_state state) {
-    handle_key_press_core(input->xkb.state, key);
+    if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
+        handle_key_press_core(input->xkb.state, key, unicode);
 }
 
 #endif

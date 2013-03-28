@@ -202,6 +202,8 @@ static void window_redraw(struct window *window) {
         cairo_image_surface_get_width(buffer->cairo_surface) != window->width ||
         cairo_image_surface_get_height(buffer->cairo_surface) != window->height) {
 
+        window->current = NULL;
+
         if (buffer->cairo_surface)
             buffer_reset(buffer);
 
